@@ -1,0 +1,22 @@
+{
+  "name": "analysis3d-workspace",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/core",
+    "packages/engine-duckdb",
+    "packages/renderer-three",
+    "packages/renderer-deck",
+    "examples/web-demo"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "dev": "npm run dev -w @analysis3d/web-demo",
+    "typecheck": "tsc -b",
+    "clean": "npm run clean --workspaces --if-present"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "rootDir": ".",
+    "outDir": "dist-types",
+    "noEmit": true,
+    "paths": {
+      "@analysis3d/core": ["../../packages/core/src/index.ts"],
+      "@analysis3d/engine-duckdb": ["../../packages/engine-duckdb/src/index.ts"],
+      "@analysis3d/renderer-three": ["../../packages/renderer-three/src/index.ts"]
+    }
+  },
+  "include": ["src", "vite.config.ts"],
+  "references": [
+    { "path": "../../packages/core" },
+    { "path": "../../packages/engine-duckdb" },
+    { "path": "../../packages/renderer-three" }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./packages/core" },
+    { "path": "./packages/engine-duckdb" },
+    { "path": "./packages/renderer-three" },
+    { "path": "./packages/renderer-deck" },
+    { "path": "./examples/web-demo" }
+  ]
+}
