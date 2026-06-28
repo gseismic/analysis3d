@@ -1,4 +1,11 @@
-export type ColumnKind = "number" | "string" | "boolean" | "date" | "unknown";
+export type ColumnKind =
+  | "number"
+  | "string"
+  | "category"
+  | "boolean"
+  | "date"
+  | "datetime"
+  | "unknown";
 
 export type ColumnValues =
   | Float64Array

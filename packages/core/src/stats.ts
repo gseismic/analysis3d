@@ -131,7 +131,7 @@ export function makeColumn(options: {
   typeLabel?: string;
 }): DataColumn {
   const kind = options.kind ?? inferColumnKind(options.values);
-  const stats = kind === "number" || kind === "boolean" || kind === "date"
+  const stats = kind === "number" || kind === "boolean" || kind === "date" || kind === "datetime"
     ? computeNumericStats(options.values)
     : undefined;
 
