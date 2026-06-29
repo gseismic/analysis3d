@@ -1,7 +1,6 @@
-import { makeColumn } from "./stats";
-import { createColumnarTable, getValue, type ColumnValues, type ColumnarTable } from "./types";
-import { isNullLike, parseTimeValue, valueToLabel } from "./profile";
-import { toNumber } from "./stats";
+import { makeColumn, toNumber } from "./stats.js";
+import { createColumnarTable, getValue, type ColumnValues, type ColumnarTable } from "./types.js";
+import { isNullLike, parseTimeValue, valueToLabel } from "./profile.js";
 
 export type FilterSpec =
   | NumericRangeFilter
@@ -64,6 +63,8 @@ export interface FilterResult {
   diagnostics: FilterDiagnostics;
 }
 
+type RowEvaluator = (rowIndex: number) => boolean;
+
 export function applyFilters(table: ColumnarTable, filters: readonly FilterSpec[]): FilterResult {
   const warnings: string[] = [];
   const mask = evaluateFilterMask(table, filters, warnings);
@@ -86,9 +87,10 @@ export function evaluateFilterMask(
   filters: readonly FilterSpec[],
   warnings: string[] = []
 ): Uint8Array {
+  const evaluator = compileFilterList(table, filters, warnings);
   const mask = new Uint8Array(table.rowCount);
   for (let rowIndex = 0; rowIndex < table.rowCount; rowIndex += 1) {
-    mask[rowIndex] = evaluateFilterList(table, filters, rowIndex, warnings) ? 1 : 0;
+    mask[rowIndex] = evaluator(rowIndex) ? 1 : 0;
   }
   return mask;
 }
@@ -107,94 +109,94 @@ export function materializeRows(
   return createColumnarTable({ name, columns });
 }
 
-function evaluateFilterList(
+function compileFilterList(
   table: ColumnarTable,
   filters: readonly FilterSpec[],
-  rowIndex: number,
   warnings: string[]
-): boolean {
-  for (const filter of filters) {
-    if (!isEnabled(filter)) {
-      continue;
-    }
-    if (!evaluateFilter(table, filter, rowIndex, warnings)) {
-      return false;
-    }
-  }
-  return true;
+): RowEvaluator {
+  const evaluators = filters.filter(isEnabled).map((filter) => compileFilter(table, filter, warnings));
+  return (rowIndex) => evaluators.every((evaluator) => evaluator(rowIndex));
 }
 
-function evaluateFilter(
+function compileFilter(
   table: ColumnarTable,
   filter: FilterSpec,
-  rowIndex: number,
   warnings: string[]
-): boolean {
+): RowEvaluator {
   if (filter.type === "group") {
-    const active = filter.filters.filter(isEnabled);
+    const evaluators = filter.filters
+      .filter(isEnabled)
+      .map((entry) => compileFilter(table, entry, warnings));
     if (filter.op === "or") {
-      return active.length === 0
-        ? true
-        : active.some((entry) => evaluateFilter(table, entry, rowIndex, warnings));
+      return evaluators.length === 0
+        ? () => true
+        : (rowIndex) => evaluators.some((evaluator) => evaluator(rowIndex));
     }
-    return active.every((entry) => evaluateFilter(table, entry, rowIndex, warnings));
+    return (rowIndex) => evaluators.every((evaluator) => evaluator(rowIndex));
   }
 
   const column = table.getColumn(filter.field);
   if (!column) {
     pushUnique(warnings, `筛选字段不存在: ${filter.field}`);
-    return true;
+    return () => true;
   }
 
-  const value = getValue(column.values, rowIndex);
   if (filter.type === "numberRange") {
-    const numeric = toNumber(value);
-    if (!Number.isFinite(numeric)) {
-      return false;
-    }
-    if (filter.min != null) {
-      const ok = filter.includeMin === false ? numeric > filter.min : numeric >= filter.min;
-      if (!ok) {
+    return (rowIndex) => {
+      const numeric = toNumber(getValue(column.values, rowIndex));
+      if (!Number.isFinite(numeric)) {
         return false;
       }
-    }
-    if (filter.max != null) {
-      const ok = filter.includeMax === false ? numeric < filter.max : numeric <= filter.max;
-      if (!ok) {
-        return false;
+      if (filter.min != null) {
+        const ok = filter.includeMin === false ? numeric > filter.min : numeric >= filter.min;
+        if (!ok) {
+          return false;
+        }
       }
-    }
-    return true;
+      if (filter.max != null) {
+        const ok = filter.includeMax === false ? numeric < filter.max : numeric <= filter.max;
+        if (!ok) {
+          return false;
+        }
+      }
+      return true;
+    };
   }
 
   if (filter.type === "category") {
     const values = new Set(filter.values);
-    const hasValue = values.has(valueToLabel(value));
-    return filter.op === "notIn" ? !hasValue : hasValue;
+    return (rowIndex) => {
+      const hasValue = values.has(valueToLabel(getValue(column.values, rowIndex)));
+      return filter.op === "notIn" ? !hasValue : hasValue;
+    };
   }
 
   if (filter.type === "timeRange") {
-    const time = parseTimeValue(value);
-    if (!Number.isFinite(time)) {
-      return false;
-    }
-    const start = filter.start ? Date.parse(filter.start) : Number.NaN;
-    const end = filter.end ? Date.parse(filter.end) : Number.NaN;
-    if (Number.isFinite(start) && time < start) {
-      return false;
-    }
-    if (Number.isFinite(end) && time > end) {
-      return false;
-    }
-    return true;
+    const start = parseStartBound(filter.start, warnings);
+    const end = parseEndBound(filter.end, warnings);
+    return (rowIndex) => {
+      const time = parseTimeValue(getValue(column.values, rowIndex));
+      if (!Number.isFinite(time)) {
+        return false;
+      }
+      if (start != null && time < start) {
+        return false;
+      }
+      if (end && (end.exclusive ? time >= end.time : time > end.time)) {
+        return false;
+      }
+      return true;
+    };
   }
 
   if (filter.type === "null") {
-    const nullValue = isNullLike(value);
-    return filter.op === "isNull" ? nullValue : !nullValue;
+    return (rowIndex) => {
+      const nullValue = isNullLike(getValue(column.values, rowIndex));
+      return filter.op === "isNull" ? nullValue : !nullValue;
+    };
   }
 
-  return true;
+  return () => true;
 }
 
 function subsetValues(values: ColumnValues, mask: Uint8Array): ColumnValues {
@@ -286,4 +288,40 @@ function pushUnique(warnings: string[], warning: string): void {
   if (!warnings.includes(warning)) {
     warnings.push(warning);
   }
+}
+
+function parseStartBound(value: string | undefined, warnings: string[]): number | undefined {
+  if (!value) {
+    return undefined;
+  }
+  const parsed = Date.parse(value);
+  if (!Number.isFinite(parsed)) {
+    pushUnique(warnings, `时间筛选 start 无法解析: ${value}`);
+    return undefined;
+  }
+  return parsed;
+}
+
+function parseEndBound(
+  value: string | undefined,
+  warnings: string[]
+): { time: number; exclusive: boolean } | undefined {
+  if (!value) {
+    return undefined;
+  }
+  const parsed = Date.parse(value);
+  if (!Number.isFinite(parsed)) {
+    pushUnique(warnings, `时间筛选 end 无法解析: ${value}`);
+    return undefined;
+  }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return {
+      time: parsed + 24 * 60 * 60 * 1000,
+      exclusive: true
+    };
+  }
+  return {
+    time: parsed,
+    exclusive: false
+  };
 }

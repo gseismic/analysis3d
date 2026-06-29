@@ -1,5 +1,5 @@
-import { createColumnarTable, type ColumnarTable, type ColumnValues } from "./types";
-import { makeColumn } from "./stats";
+import { createColumnarTable, type ColumnarTable, type ColumnValues } from "./types.js";
+import { makeColumn } from "./stats.js";
 
 export function arrowTableToColumnar(arrowTable: unknown, name = "result"): ColumnarTable {
   const table = arrowTable as {

@@ -1,4 +1,4 @@
-import type { NumericStats } from "./types";
+import type { NumericStats } from "./types.js";
 
 export function clamp01(value: number): number {
   if (!Number.isFinite(value)) {

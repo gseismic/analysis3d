@@ -1,6 +1,6 @@
-import type { ColumnarTable, NumericStats } from "./types";
-import { colorArrayFromValues } from "./colors";
-import { columnToFloat64, scaleToUnit, statsFromFloat64 } from "./stats";
+import type { ColumnarTable, NumericStats } from "./types.js";
+import { colorArrayFromValues } from "./colors.js";
+import { columnToFloat64, scaleToUnit, statsFromFloat64 } from "./stats.js";
 
 export type SurfaceAggregate = "mean" | "sum" | "min" | "max" | "count";
 

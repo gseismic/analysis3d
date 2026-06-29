@@ -1,6 +1,6 @@
-import { makeColumn, columnToFloat64 } from "./stats";
-import { createColumnarTable, getValue, type ColumnarTable } from "./types";
-import { valueToLabel } from "./profile";
+import { makeColumn, columnToFloat64 } from "./stats.js";
+import { createColumnarTable, getValue, type ColumnarTable } from "./types.js";
+import { valueToLabel } from "./profile.js";
 
 export type TransformStep =
   | ClipStep
@@ -128,8 +128,10 @@ function executeStep(
     output = runZScore(values, groups, warnings);
   } else if (step.type === "rank") {
     output = runRank(values, groups, step, warnings);
-  } else {
+  } else if (step.type === "log") {
     output = runLog(values, step, warnings);
+  } else {
+    throw new Error(`不支持的预处理类型: ${(step as { type: string }).type}`);
   }
 
   return {

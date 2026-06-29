@@ -6,7 +6,7 @@ import {
   type NumericStats,
   getLength,
   getValue
-} from "./types";
+} from "./types.js";
 
 export function isTypedNumericArray(values: ColumnValues): boolean {
   return ArrayBuffer.isView(values) && !(values instanceof DataView);

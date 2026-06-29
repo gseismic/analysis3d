@@ -727,7 +727,7 @@ function addTransform(): void {
 
   transforms = [...transforms, step];
   transformOutput.value = "";
-  applyPipeline({ x: output });
+  applyPipeline({ ...readPlotMapping(), x: output });
 }
 
 function renderLists(): void {

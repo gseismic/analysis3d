@@ -1,5 +1,5 @@
-import type { ColumnKind, ColumnarTable, DataColumn, NumericStats } from "./types";
-import { getLength, getValue } from "./types";
+import type { ColumnKind, ColumnarTable, DataColumn, NumericStats } from "./types.js";
+import { getLength, getValue } from "./types.js";
 
 export type FieldRole =
   | "id"

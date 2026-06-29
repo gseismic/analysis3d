@@ -1,5 +1,5 @@
-import { createColumnarTable, type ColumnarTable } from "./types";
-import { makeColumn } from "./stats";
+import { createColumnarTable, type ColumnarTable } from "./types.js";
+import { makeColumn } from "./stats.js";
 
 export function createDemoFinancialTable(rowCount = 80_000): ColumnarTable {
   const tradeDate: string[] = new Array(rowCount);

@@ -1,5 +1,5 @@
-import type { ColumnarTable, NumericStats } from "./types";
-import { columnToFloat64, scaleToUnit, statsFromFloat64 } from "./stats";
+import type { ColumnarTable, NumericStats } from "./types.js";
+import { columnToFloat64, scaleToUnit, statsFromFloat64 } from "./stats.js";
 
 export interface PlotMapping {
   x: string;
