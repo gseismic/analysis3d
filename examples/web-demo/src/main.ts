@@ -15,6 +15,7 @@ import {
   type FieldProfile,
   type FilterDiagnostics,
   type FilterSpec,
+  type NumericStats,
   type PlotMapping,
   type TransformPipelineDiagnostics,
   type TransformStep
@@ -267,6 +268,7 @@ app.innerHTML = `
           <strong id="field-count">0</strong>
         </div>
       </div>
+      <div id="axis-ranges" class="axis-ranges"></div>
       <div id="viewer" class="viewer" aria-label="Analysis3D viewer"></div>
     </main>
 
@@ -305,6 +307,7 @@ const filteredRows = requiredElement<HTMLElement>("filtered-rows");
 const preparedRows = requiredElement<HTMLElement>("prepared-rows");
 const fieldCount = requiredElement<HTMLElement>("field-count");
 const renderCount = requiredElement<HTMLElement>("render-count");
+const axisRanges = requiredElement<HTMLDivElement>("axis-ranges");
 const diagnosticSummary = requiredElement<HTMLElement>("diagnostic-summary");
 const diagnosticsElement = requiredElement<HTMLDivElement>("diagnostics");
 const profileCount = requiredElement<HTMLElement>("profile-count");
@@ -522,6 +525,8 @@ function renderCurrentTable(): void {
   const numericFields = getNumericColumnNames(preparedTable);
   if (preparedTable.rowCount === 0 || numericFields.length === 0) {
     viewer.clearData();
+    viewer.clearAxisGuide();
+    renderAxisRanges();
     renderCount.textContent = "0";
     setStatus("No rows available after filters");
     return;
@@ -538,8 +543,17 @@ function renderCurrentTable(): void {
         binsY: 72,
         aggregate: "mean"
       });
-      viewer.setSurface(surface);
+      viewer.setSurface(surface, {
+        x: { label: xField.value, stats: surface.stats.x, color: "#5bbcff" },
+        y: { label: zField.value, stats: surface.stats.z, color: "#f5d76e" },
+        z: { label: yField.value, stats: surface.stats.y, color: "#42c49e" }
+      });
       renderCount.textContent = formatNumber(surface.values.length);
+      renderAxisRanges([
+        { axis: "X", label: xField.value, stats: surface.stats.x },
+        { axis: "Y height", label: zField.value, stats: surface.stats.z },
+        { axis: "Z depth", label: yField.value, stats: surface.stats.y }
+      ]);
     } else {
       const plot = createPlotArrays(preparedTable, {
         x: xField.value,
@@ -551,13 +565,49 @@ function renderCurrentTable(): void {
       });
       viewer.setPointCloud(plot);
       renderCount.textContent = formatNumber(plot.count);
+      renderAxisRanges([
+        { axis: "X", label: plot.mapping.x, stats: plot.stats.x },
+        { axis: "Y height", label: plot.mapping.z, stats: plot.stats.z },
+        { axis: "Z depth", label: plot.mapping.y, stats: plot.stats.y },
+        { axis: "Color", label: plot.mapping.color ?? plot.mapping.z, stats: plot.stats.color }
+      ]);
     }
     setStatus(`${currentMode === "surface" ? "Surface" : "Point cloud"} rendered`);
   } catch (error) {
     viewer.clearData();
+    viewer.clearAxisGuide();
+    renderAxisRanges();
     renderCount.textContent = "0";
     setStatus(error instanceof Error ? error.message : String(error));
   }
+}
+
+function renderAxisRanges(items: Array<{
+  axis: string;
+  label: string;
+  stats: NumericStats;
+}> = []): void {
+  if (items.length === 0) {
+    axisRanges.replaceChildren(createAxisRangeCard("Axis ranges", "等待可绘制字段", ""));
+    return;
+  }
+  axisRanges.replaceChildren(...items.map((item) => createAxisRangeCard(
+    item.axis,
+    item.label,
+    `${formatRangeValue(item.stats.min)} .. ${formatRangeValue(item.stats.max)}`
+  )));
+}
+
+function createAxisRangeCard(axis: string, label: string, range: string): HTMLElement {
+  const card = document.createElement("div");
+  card.className = "axis-card";
+  const rangeText = range ? `<strong>${escapeHtml(range)}</strong>` : "";
+  card.innerHTML = `
+    <span>${escapeHtml(axis)}</span>
+    <em>${escapeHtml(label)}</em>
+    ${rangeText}
+  `;
+  return card;
 }
 
 function renderFilterBuilder(): void {
@@ -860,10 +910,10 @@ function populatePlotSelects(mapping: Partial<PlotMapping>): void {
     }
     return;
   }
-  populateSelect(xField, numericFields, mapping.x ?? pickField(numericFields, ["imbalance", "feature_a"], 0));
-  populateSelect(yField, numericFields, mapping.y ?? pickField(numericFields, ["volatility", "feature_b"], 1));
-  populateSelect(zField, numericFields, mapping.z ?? pickField(numericFields, ["future_return", "return", "score"], 2));
-  populateSelect(colorField, numericFields, mapping.color ?? pickField(numericFields, ["shap", "volume", "return"], Math.min(3, numericFields.length - 1)));
+  populateSelect(xField, numericFields, chooseMappedField(numericFields, mapping.x, ["imbalance", "feature_a"], 0));
+  populateSelect(yField, numericFields, chooseMappedField(numericFields, mapping.y, ["volatility", "feature_b"], 1));
+  populateSelect(zField, numericFields, chooseMappedField(numericFields, mapping.z, ["future_return", "return", "score"], 2));
+  populateSelect(colorField, numericFields, chooseMappedField(numericFields, mapping.color, ["shap", "volume", "return"], Math.min(3, numericFields.length - 1)));
 }
 
 function buildCurrentConfig(): AnalysisConfig {
@@ -1022,6 +1072,17 @@ function pickField(fields: string[], hints: string[], fallbackIndex: number): st
   return matched ?? fields[Math.min(fallbackIndex, fields.length - 1)];
 }
 
+function chooseMappedField(
+  fields: string[],
+  candidate: string | undefined,
+  hints: string[],
+  fallbackIndex: number
+): string {
+  return candidate && fields.includes(candidate)
+    ? candidate
+    : pickField(fields, hints, fallbackIndex);
+}
+
 function pickDefaultFilterField(): string {
   return sourceProfiles.find((profile) => profile.kind === "number")?.name
     ?? sourceProfiles.find((profile) => profile.kind === "datetime" || profile.kind === "date")?.name
@@ -1047,6 +1108,17 @@ function roundNumber(value: number): number {
     return value;
   }
   return Number(value.toPrecision(6));
+}
+
+function formatRangeValue(value: number): string {
+  if (!Number.isFinite(value)) {
+    return "NaN";
+  }
+  const absolute = Math.abs(value);
+  if ((absolute > 0 && absolute < 0.001) || absolute >= 100000) {
+    return value.toExponential(2);
+  }
+  return Number(value.toPrecision(5)).toString();
 }
 
 function toDateInput(time: number): string {

@@ -292,7 +292,7 @@ select[multiple] {
 
 .workspace {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
   min-width: 0;
   min-height: 0;
   background: #101113;
@@ -327,6 +327,49 @@ select[multiple] {
   line-height: 1.15;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+.axis-ranges {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  border-bottom: 1px solid #2d333a;
+  background: #2d333a;
+}
+
+.axis-card {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+  padding: 9px 14px 10px;
+  background: #12161b;
+}
+
+.axis-card span,
+.axis-card em,
+.axis-card strong {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.axis-card span {
+  color: #9da6b3;
+  font-size: 11px;
+  font-style: normal;
+}
+
+.axis-card em {
+  color: #eef2f6;
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.axis-card strong {
+  color: #73c7ff;
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .viewer {
@@ -435,6 +478,10 @@ select[multiple] {
   }
 
   .workspace-top {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .axis-ranges {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
