@@ -26,6 +26,8 @@ export interface AxisGuideOptions {
   z: AxisDescriptor;
 }
 
+const AXIS_TICK_COUNT = 5;
+
 export class Analysis3DViewer {
   readonly container: HTMLElement;
   readonly renderer: THREE.WebGLRenderer;
@@ -148,8 +150,8 @@ export class Analysis3DViewer {
       end: new THREE.Vector3(length, origin.y, origin.z),
       descriptor: options.x,
       axisName: "X",
-      minPosition: new THREE.Vector3(-1.05, origin.y - 0.08, origin.z),
-      maxPosition: new THREE.Vector3(length, origin.y - 0.08, origin.z),
+      tickDirection: new THREE.Vector3(0, 0, 1),
+      tickLabelOffset: new THREE.Vector3(0, -0.13, 0.13),
       labelPosition: new THREE.Vector3(length + 0.18, origin.y + 0.02, origin.z)
     });
     this.addAxisGuideLine({
@@ -157,8 +159,8 @@ export class Analysis3DViewer {
       end: new THREE.Vector3(origin.x, length, origin.z),
       descriptor: options.y,
       axisName: "Y height",
-      minPosition: new THREE.Vector3(origin.x - 0.1, origin.y, origin.z),
-      maxPosition: new THREE.Vector3(origin.x - 0.1, length, origin.z),
+      tickDirection: new THREE.Vector3(1, 0, 0),
+      tickLabelOffset: new THREE.Vector3(-0.18, 0, 0.04),
       labelPosition: new THREE.Vector3(origin.x - 0.16, length + 0.16, origin.z)
     });
     this.addAxisGuideLine({
@@ -166,8 +168,8 @@ export class Analysis3DViewer {
       end: new THREE.Vector3(origin.x, origin.y, length),
       descriptor: options.z,
       axisName: "Z depth",
-      minPosition: new THREE.Vector3(origin.x, origin.y - 0.08, origin.z),
-      maxPosition: new THREE.Vector3(origin.x, origin.y - 0.08, length),
+      tickDirection: new THREE.Vector3(1, 0, 0),
+      tickLabelOffset: new THREE.Vector3(0.14, -0.13, 0),
       labelPosition: new THREE.Vector3(origin.x, origin.y + 0.02, length + 0.22)
     });
   }
@@ -236,8 +238,8 @@ export class Analysis3DViewer {
     end: THREE.Vector3;
     descriptor: AxisDescriptor;
     axisName: string;
-    minPosition: THREE.Vector3;
-    maxPosition: THREE.Vector3;
+    tickDirection: THREE.Vector3;
+    tickLabelOffset: THREE.Vector3;
     labelPosition: THREE.Vector3;
   }): void {
     const color = new THREE.Color(options.descriptor.color ?? "#ffffff");
@@ -249,19 +251,44 @@ export class Analysis3DViewer {
     this.axisGuideGroup.add(createTextSprite(`${options.axisName}: ${options.descriptor.label}`, {
       color,
       position: options.labelPosition,
+      name: `analysis3d-axis-${options.axisName}-label`,
       scale: 0.18,
       weight: 700
     }));
-    this.axisGuideGroup.add(createTextSprite(formatAxisValue(options.descriptor.stats.min), {
-      color,
-      position: options.minPosition,
-      scale: 0.12
-    }));
-    this.axisGuideGroup.add(createTextSprite(formatAxisValue(options.descriptor.stats.max), {
-      color,
-      position: options.maxPosition,
-      scale: 0.12
-    }));
+    this.addAxisTicks(options, color);
+  }
+
+  private addAxisTicks(options: {
+    start: THREE.Vector3;
+    end: THREE.Vector3;
+    descriptor: AxisDescriptor;
+    axisName: string;
+    tickDirection: THREE.Vector3;
+    tickLabelOffset: THREE.Vector3;
+  }, color: THREE.Color): void {
+    const tickDirection = options.tickDirection.clone().normalize();
+    const tickSize = 0.09;
+    const ticks = createAxisTicks(options.descriptor.stats, AXIS_TICK_COUNT);
+    ticks.forEach((tick, index) => {
+      const position = options.start.clone().lerp(options.end, tick.ratio);
+      const tickStart = position.clone().addScaledVector(tickDirection, -tickSize / 2);
+      const tickEnd = position.clone().addScaledVector(tickDirection, tickSize / 2);
+      const tickGeometry = new THREE.BufferGeometry().setFromPoints([tickStart, tickEnd]);
+      const tickMaterial = new THREE.LineBasicMaterial({
+        color,
+        transparent: true,
+        opacity: 0.9
+      });
+      const line = new THREE.Line(tickGeometry, tickMaterial);
+      line.name = `analysis3d-axis-${options.axisName}-tick-${index}`;
+      this.axisGuideGroup.add(line);
+      this.axisGuideGroup.add(createTextSprite(formatAxisValue(tick.value), {
+        color,
+        position: position.clone().add(options.tickLabelOffset),
+        name: `analysis3d-axis-${options.axisName}-tick-label-${index}`,
+        scale: 0.105
+      }));
+    });
   }
 }
 
@@ -292,6 +319,7 @@ function disposeMaterial(material?: THREE.Material): void {
 
 function createTextSprite(optionsText: string, options: {
   color: THREE.Color;
+  name?: string;
   position: THREE.Vector3;
   scale: number;
   weight?: number;
@@ -324,10 +352,30 @@ function createTextSprite(optionsText: string, options: {
     depthWrite: false
   });
   const sprite = new THREE.Sprite(material);
+  if (options.name) {
+    sprite.name = options.name;
+  }
   sprite.position.copy(options.position);
   sprite.scale.set(options.scale * (canvas.width / canvas.height), options.scale, 1);
   sprite.renderOrder = 10;
   return sprite;
+}
+
+function createAxisTicks(stats: NumericStats, count: number): Array<{ value: number; ratio: number }> {
+  if (!Number.isFinite(stats.min) || !Number.isFinite(stats.max)) {
+    return [];
+  }
+  const range = stats.max - stats.min;
+  if (range === 0 || count <= 1) {
+    return [{ value: stats.min, ratio: 0.5 }];
+  }
+  return Array.from({ length: count }, (_, index) => {
+    const ratio = index / (count - 1);
+    return {
+      value: stats.min + range * ratio,
+      ratio
+    };
+  });
 }
 
 function roundRect(
