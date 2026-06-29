@@ -18,6 +18,8 @@ export interface AxisDescriptor {
   label: string;
   stats: NumericStats;
   color?: string | number;
+  unitHalfRange?: number;
+  targetTickCount?: number;
 }
 
 export interface AxisGuideOptions {
@@ -26,7 +28,32 @@ export interface AxisGuideOptions {
   z: AxisDescriptor;
 }
 
-const AXIS_TICK_COUNT = 5;
+const DEFAULT_AXIS_HALF_RANGE = 1;
+const DEFAULT_TARGET_MAJOR_TICKS = 6;
+const MINOR_TICK_DIVISIONS = 5;
+const MAJOR_TICK_SIZE = 0.095;
+const MINOR_TICK_SIZE = 0.052;
+
+interface AxisTick {
+  value: number;
+  unit: number;
+  label: string;
+}
+
+interface AxisScale {
+  descriptor: AxisDescriptor;
+  unitMin: number;
+  unitMax: number;
+  majorStep: number;
+  majorTicks: AxisTick[];
+  minorTicks: AxisTick[];
+}
+
+interface AxisLayout {
+  x: AxisScale;
+  y: AxisScale;
+  z: AxisScale;
+}
 
 export class Analysis3DViewer {
   readonly container: HTMLElement;
@@ -143,34 +170,35 @@ export class Analysis3DViewer {
 
   setAxisGuide(options: AxisGuideOptions): void {
     this.clearAxisGuide();
-    const length = 1.28;
-    const origin = new THREE.Vector3(-1.05, -1.02, -1.05);
+    const layout = createAxisLayout(options);
+    const origin = new THREE.Vector3(layout.x.unitMin, layout.y.unitMin, layout.z.unitMin);
+    this.addReferenceGrid(layout);
     this.addAxisGuideLine({
       start: origin,
-      end: new THREE.Vector3(length, origin.y, origin.z),
-      descriptor: options.x,
+      end: new THREE.Vector3(layout.x.unitMax, origin.y, origin.z),
+      scale: layout.x,
       axisName: "X",
       tickDirection: new THREE.Vector3(0, 0, 1),
-      tickLabelOffset: new THREE.Vector3(0, -0.13, 0.13),
-      labelPosition: new THREE.Vector3(length + 0.18, origin.y + 0.02, origin.z)
+      tickLabelOffset: new THREE.Vector3(0, -0.12, 0.14),
+      labelPosition: new THREE.Vector3(layout.x.unitMax + 0.18, origin.y + 0.02, origin.z)
     });
     this.addAxisGuideLine({
       start: origin,
-      end: new THREE.Vector3(origin.x, length, origin.z),
-      descriptor: options.y,
+      end: new THREE.Vector3(origin.x, layout.y.unitMax, origin.z),
+      scale: layout.y,
       axisName: "Y height",
       tickDirection: new THREE.Vector3(1, 0, 0),
       tickLabelOffset: new THREE.Vector3(-0.18, 0, 0.04),
-      labelPosition: new THREE.Vector3(origin.x - 0.16, length + 0.16, origin.z)
+      labelPosition: new THREE.Vector3(origin.x - 0.16, layout.y.unitMax + 0.16, origin.z)
     });
     this.addAxisGuideLine({
       start: origin,
-      end: new THREE.Vector3(origin.x, origin.y, length),
-      descriptor: options.z,
+      end: new THREE.Vector3(origin.x, origin.y, layout.z.unitMax),
+      scale: layout.z,
       axisName: "Z depth",
       tickDirection: new THREE.Vector3(1, 0, 0),
       tickLabelOffset: new THREE.Vector3(0.14, -0.13, 0),
-      labelPosition: new THREE.Vector3(origin.x, origin.y + 0.02, length + 0.22)
+      labelPosition: new THREE.Vector3(origin.x, origin.y + 0.02, layout.z.unitMax + 0.22)
     });
   }
 
@@ -200,21 +228,12 @@ export class Analysis3DViewer {
     this.renderer.domElement.remove();
   }
 
-  private installBaseScene(showGrid: boolean): void {
+  private installBaseScene(_showGrid: boolean): void {
     const ambientLight = new THREE.AmbientLight("#ffffff", 0.75);
     this.scene.add(ambientLight);
     const directionalLight = new THREE.DirectionalLight("#ffffff", 1.2);
     directionalLight.position.set(3, 4, 2);
     this.scene.add(directionalLight);
-
-    if (showGrid) {
-      const grid = new THREE.GridHelper(2.4, 12, "#607080", "#26313c");
-      grid.position.y = -1.05;
-      this.scene.add(grid);
-      const axes = new THREE.AxesHelper(1.35);
-      axes.position.set(-1.08, -1.04, -1.08);
-      this.scene.add(axes);
-    }
   }
 
   private fitCamera(): void {
@@ -236,19 +255,22 @@ export class Analysis3DViewer {
   private addAxisGuideLine(options: {
     start: THREE.Vector3;
     end: THREE.Vector3;
-    descriptor: AxisDescriptor;
+    scale: AxisScale;
     axisName: string;
     tickDirection: THREE.Vector3;
     tickLabelOffset: THREE.Vector3;
     labelPosition: THREE.Vector3;
   }): void {
-    const color = new THREE.Color(options.descriptor.color ?? "#ffffff");
-    const geometry = new THREE.BufferGeometry().setFromPoints([options.start, options.end]);
-    const material = new THREE.LineBasicMaterial({ color });
-    const line = new THREE.Line(geometry, material);
-    line.name = `analysis3d-axis-${options.axisName}`;
-    this.axisGuideGroup.add(line);
-    this.axisGuideGroup.add(createTextSprite(`${options.axisName}: ${options.descriptor.label}`, {
+    const color = new THREE.Color(options.scale.descriptor.color ?? "#ffffff");
+    this.axisGuideGroup.add(createLine(
+      [options.start, options.end],
+      {
+        color,
+        name: `analysis3d-axis-${options.axisName}`,
+        opacity: 0.95
+      }
+    ));
+    this.axisGuideGroup.add(createTextSprite(`${options.axisName}: ${options.scale.descriptor.label}`, {
       color,
       position: options.labelPosition,
       name: `analysis3d-axis-${options.axisName}-label`,
@@ -261,35 +283,263 @@ export class Analysis3DViewer {
   private addAxisTicks(options: {
     start: THREE.Vector3;
     end: THREE.Vector3;
-    descriptor: AxisDescriptor;
+    scale: AxisScale;
     axisName: string;
     tickDirection: THREE.Vector3;
     tickLabelOffset: THREE.Vector3;
   }, color: THREE.Color): void {
     const tickDirection = options.tickDirection.clone().normalize();
-    const tickSize = 0.09;
-    const ticks = createAxisTicks(options.descriptor.stats, AXIS_TICK_COUNT);
-    ticks.forEach((tick, index) => {
-      const position = options.start.clone().lerp(options.end, tick.ratio);
-      const tickStart = position.clone().addScaledVector(tickDirection, -tickSize / 2);
-      const tickEnd = position.clone().addScaledVector(tickDirection, tickSize / 2);
-      const tickGeometry = new THREE.BufferGeometry().setFromPoints([tickStart, tickEnd]);
-      const tickMaterial = new THREE.LineBasicMaterial({
+    options.scale.minorTicks.forEach((tick, index) => {
+      const position = projectTick(options.start, options.end, options.scale, tick);
+      this.axisGuideGroup.add(createTickLine({
+        position,
+        tickDirection,
+        tickSize: MINOR_TICK_SIZE,
         color,
-        transparent: true,
-        opacity: 0.9
-      });
-      const line = new THREE.Line(tickGeometry, tickMaterial);
-      line.name = `analysis3d-axis-${options.axisName}-tick-${index}`;
-      this.axisGuideGroup.add(line);
-      this.axisGuideGroup.add(createTextSprite(formatAxisValue(tick.value), {
+        opacity: 0.42,
+        name: `analysis3d-axis-${options.axisName}-minor-tick-${index}`
+      }));
+    });
+    options.scale.majorTicks.forEach((tick, index) => {
+      const position = projectTick(options.start, options.end, options.scale, tick);
+      this.axisGuideGroup.add(createTickLine({
+        position,
+        tickDirection,
+        tickSize: MAJOR_TICK_SIZE,
+        color,
+        opacity: 0.9,
+        name: `analysis3d-axis-${options.axisName}-major-tick-${index}`
+      }));
+      this.axisGuideGroup.add(createTextSprite(tick.label, {
         color,
         position: position.clone().add(options.tickLabelOffset),
-        name: `analysis3d-axis-${options.axisName}-tick-label-${index}`,
-        scale: 0.105
+        name: `analysis3d-axis-${options.axisName}-major-label-${index}`,
+        scale: 0.095
       }));
     });
   }
+
+  private addReferenceGrid(layout: AxisLayout): void {
+    const bottomColor = new THREE.Color("#6a7786");
+    const heightColor = new THREE.Color("#6d7780");
+    const yBase = layout.y.unitMin;
+    const zBase = layout.z.unitMin;
+    const xBase = layout.x.unitMin;
+
+    layout.x.majorTicks.forEach((tick, index) => {
+      this.axisGuideGroup.add(createLine(
+        [
+          new THREE.Vector3(tick.unit, yBase, layout.z.unitMin),
+          new THREE.Vector3(tick.unit, yBase, layout.z.unitMax)
+        ],
+        {
+          color: bottomColor,
+          name: `analysis3d-axis-grid-x-major-${index}`,
+          opacity: 0.16
+        }
+      ));
+    });
+    layout.z.majorTicks.forEach((tick, index) => {
+      this.axisGuideGroup.add(createLine(
+        [
+          new THREE.Vector3(layout.x.unitMin, yBase, tick.unit),
+          new THREE.Vector3(layout.x.unitMax, yBase, tick.unit)
+        ],
+        {
+          color: bottomColor,
+          name: `analysis3d-axis-grid-z-major-${index}`,
+          opacity: 0.16
+        }
+      ));
+    });
+    layout.y.majorTicks.forEach((tick, index) => {
+      this.axisGuideGroup.add(createLine(
+        [
+          new THREE.Vector3(xBase, tick.unit, zBase),
+          new THREE.Vector3(layout.x.unitMax, tick.unit, zBase)
+        ],
+        {
+          color: heightColor,
+          name: `analysis3d-axis-grid-y-major-${index}`,
+          opacity: 0.14
+        }
+      ));
+    });
+  }
+}
+
+function createAxisLayout(options: AxisGuideOptions): AxisLayout {
+  return {
+    x: createAxisScale(options.x),
+    y: createAxisScale(options.y),
+    z: createAxisScale(options.z)
+  };
+}
+
+function createAxisScale(descriptor: AxisDescriptor): AxisScale {
+  const unitHalfRange = descriptor.unitHalfRange ?? DEFAULT_AXIS_HALF_RANGE;
+  const unitMin = -unitHalfRange;
+  const unitMax = unitHalfRange;
+  const majorStep = createNiceStep(descriptor.stats, descriptor.targetTickCount ?? DEFAULT_TARGET_MAJOR_TICKS);
+  const majorTicks = createMajorTicks(descriptor, unitMin, unitMax, majorStep);
+  return {
+    descriptor,
+    unitMin,
+    unitMax,
+    majorStep,
+    majorTicks,
+    minorTicks: createMinorTicks(descriptor, unitMin, unitMax, majorStep, majorTicks)
+  };
+}
+
+function createMajorTicks(
+  descriptor: AxisDescriptor,
+  unitMin: number,
+  unitMax: number,
+  step: number
+): AxisTick[] {
+  const { min, max } = descriptor.stats;
+  if (!Number.isFinite(min) || !Number.isFinite(max)) {
+    return [];
+  }
+  if (max === min || step === 0) {
+    return [{
+      value: min,
+      unit: (unitMin + unitMax) / 2,
+      label: formatAxisValue(min)
+    }];
+  }
+
+  const epsilon = Math.abs(step) * 1e-6;
+  const start = Math.ceil((min - epsilon) / step) * step;
+  const stop = Math.floor((max + epsilon) / step) * step;
+  const ticks: AxisTick[] = [];
+  for (let value = start; value <= stop + epsilon; value += step) {
+    const rounded = roundToStep(value, step);
+    ticks.push({
+      value: rounded,
+      unit: valueToUnit(rounded, descriptor.stats, unitMin, unitMax),
+      label: formatAxisValue(rounded, step)
+    });
+  }
+
+  if (ticks.length >= 2) {
+    return ticks;
+  }
+
+  return [min, max].map((value) => ({
+    value,
+    unit: valueToUnit(value, descriptor.stats, unitMin, unitMax),
+    label: formatAxisValue(value, step)
+  }));
+}
+
+function createMinorTicks(
+  descriptor: AxisDescriptor,
+  unitMin: number,
+  unitMax: number,
+  majorStep: number,
+  majorTicks: AxisTick[]
+): AxisTick[] {
+  const { min, max } = descriptor.stats;
+  if (!Number.isFinite(min) || !Number.isFinite(max) || max === min || majorStep === 0) {
+    return [];
+  }
+  const minorStep = majorStep / MINOR_TICK_DIVISIONS;
+  const maxMinorTicks = 80;
+  const epsilon = Math.abs(minorStep) * 1e-6;
+  const majorValues = new Set(majorTicks.map((tick) => roundToStep(tick.value, minorStep).toString()));
+  const start = Math.ceil((min - epsilon) / minorStep) * minorStep;
+  const stop = Math.floor((max + epsilon) / minorStep) * minorStep;
+  const ticks: AxisTick[] = [];
+
+  for (let value = start; value <= stop + epsilon && ticks.length < maxMinorTicks; value += minorStep) {
+    const rounded = roundToStep(value, minorStep);
+    if (majorValues.has(rounded.toString())) {
+      continue;
+    }
+    ticks.push({
+      value: rounded,
+      unit: valueToUnit(rounded, descriptor.stats, unitMin, unitMax),
+      label: ""
+    });
+  }
+
+  return ticks;
+}
+
+function createNiceStep(stats: NumericStats, targetTickCount: number): number {
+  const range = stats.max - stats.min;
+  if (!Number.isFinite(range) || range === 0) {
+    return 0;
+  }
+  const rawStep = Math.abs(range) / Math.max(1, targetTickCount);
+  const power = Math.floor(Math.log10(rawStep));
+  const base = 10 ** power;
+  const error = rawStep / base;
+  const factor = error >= Math.sqrt(50)
+    ? 10
+    : error >= Math.sqrt(10)
+      ? 5
+      : error >= Math.sqrt(2)
+        ? 2
+        : 1;
+  return factor * base;
+}
+
+function valueToUnit(value: number, stats: NumericStats, unitMin: number, unitMax: number): number {
+  const range = stats.max - stats.min;
+  if (!Number.isFinite(value) || !Number.isFinite(range) || range === 0) {
+    return (unitMin + unitMax) / 2;
+  }
+  const ratio = (value - stats.min) / range;
+  return unitMin + ratio * (unitMax - unitMin);
+}
+
+function projectTick(start: THREE.Vector3, end: THREE.Vector3, scale: AxisScale, tick: AxisTick): THREE.Vector3 {
+  const ratio = scale.unitMax === scale.unitMin
+    ? 0.5
+    : (tick.unit - scale.unitMin) / (scale.unitMax - scale.unitMin);
+  return start.clone().lerp(end, ratio);
+}
+
+function createTickLine(options: {
+  position: THREE.Vector3;
+  tickDirection: THREE.Vector3;
+  tickSize: number;
+  color: THREE.Color;
+  opacity: number;
+  name: string;
+}): THREE.Line {
+  const tickStart = options.position.clone().addScaledVector(options.tickDirection, -options.tickSize / 2);
+  const tickEnd = options.position.clone().addScaledVector(options.tickDirection, options.tickSize / 2);
+  return createLine([tickStart, tickEnd], {
+    color: options.color,
+    name: options.name,
+    opacity: options.opacity
+  });
+}
+
+function createLine(points: THREE.Vector3[], options: {
+  color: THREE.Color;
+  name: string;
+  opacity: number;
+  userData?: Record<string, unknown>;
+}): THREE.Line {
+  const geometry = new THREE.BufferGeometry().setFromPoints(points);
+  const material = new THREE.LineBasicMaterial({
+    color: options.color,
+    transparent: options.opacity < 1,
+    opacity: options.opacity,
+    depthTest: false
+  });
+  const line = new THREE.Line(geometry, material);
+  line.name = options.name;
+  if (options.userData) {
+    Object.assign(line.userData, options.userData);
+  }
+  line.renderOrder = 4;
+  return line;
 }
 
 function disposeObject(object: THREE.Object3D): void {
@@ -355,27 +605,11 @@ function createTextSprite(optionsText: string, options: {
   if (options.name) {
     sprite.name = options.name;
   }
+  sprite.userData.text = optionsText;
   sprite.position.copy(options.position);
   sprite.scale.set(options.scale * (canvas.width / canvas.height), options.scale, 1);
   sprite.renderOrder = 10;
   return sprite;
-}
-
-function createAxisTicks(stats: NumericStats, count: number): Array<{ value: number; ratio: number }> {
-  if (!Number.isFinite(stats.min) || !Number.isFinite(stats.max)) {
-    return [];
-  }
-  const range = stats.max - stats.min;
-  if (range === 0 || count <= 1) {
-    return [{ value: stats.min, ratio: 0.5 }];
-  }
-  return Array.from({ length: count }, (_, index) => {
-    const ratio = index / (count - 1);
-    return {
-      value: stats.min + range * ratio,
-      ratio
-    };
-  });
 }
 
 function roundRect(
@@ -399,13 +633,40 @@ function roundRect(
   context.closePath();
 }
 
-function formatAxisValue(value: number): string {
+function roundToStep(value: number, step: number): number {
+  if (!Number.isFinite(value) || step === 0) {
+    return value;
+  }
+  const decimals = Math.max(0, Math.ceil(-Math.log10(Math.abs(step))) + 2);
+  return Number(value.toFixed(Math.min(12, decimals)));
+}
+
+function formatAxisValue(value: number, step?: number): string {
   if (!Number.isFinite(value)) {
     return "NaN";
   }
   const absolute = Math.abs(value);
-  if ((absolute > 0 && absolute < 0.001) || absolute >= 100000) {
+  if (absolute >= 1_000_000_000) {
+    return `${trimNumeric(value / 1_000_000_000, 2)}B`;
+  }
+  if (absolute >= 1_000_000) {
+    return `${trimNumeric(value / 1_000_000, 2)}M`;
+  }
+  if (absolute >= 10_000) {
+    return `${trimNumeric(value / 1_000, 2)}k`;
+  }
+  if (absolute > 0 && absolute < 0.001) {
     return value.toExponential(2);
   }
-  return Number(value.toPrecision(4)).toString();
+  if (!step || !Number.isFinite(step)) {
+    return Number(value.toPrecision(4)).toString();
+  }
+  const decimals = Math.max(0, Math.min(6, Math.ceil(-Math.log10(Math.abs(step))) + 1));
+  return trimNumeric(value, decimals);
+}
+
+function trimNumeric(value: number, decimals: number): string {
+  return value.toFixed(decimals)
+    .replace(/\.0+$/, "")
+    .replace(/(\.\d*?)0+$/, "$1");
 }

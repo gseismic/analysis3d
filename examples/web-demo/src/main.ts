@@ -30,6 +30,8 @@ import "./styles.css";
 
 type RenderMode = "point" | "surface";
 
+const SURFACE_HEIGHT_SCALE = 0.8;
+
 const app = document.querySelector<HTMLDivElement>("#app");
 if (!app) {
   throw new Error("缺少 #app");
@@ -541,11 +543,12 @@ function renderCurrentTable(): void {
       }, {
         binsX: 72,
         binsY: 72,
-        aggregate: "mean"
+        aggregate: "mean",
+        heightScale: SURFACE_HEIGHT_SCALE
       });
       viewer.setSurface(surface, {
         x: { label: xField.value, stats: surface.stats.x, color: "#5bbcff" },
-        y: { label: zField.value, stats: surface.stats.z, color: "#f5d76e" },
+        y: { label: zField.value, stats: surface.stats.z, color: "#f5d76e", unitHalfRange: SURFACE_HEIGHT_SCALE },
         z: { label: yField.value, stats: surface.stats.y, color: "#42c49e" }
       });
       renderCount.textContent = formatNumber(surface.values.length);
